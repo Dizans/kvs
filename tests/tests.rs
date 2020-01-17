@@ -27,7 +27,7 @@ fn cli_get() {
         .args(&["get", "key1"])
         .assert()
         .failure()
-        .stderr(contains("unimplemented"));
+        .stderr(contains("implemented"));
 }
 
 // `kvs set <KEY> <VALUE>` should print "unimplemented" to stderr and exit with non-zero code
@@ -38,7 +38,7 @@ fn cli_set() {
         .args(&["set", "key1", "value1"])
         .assert()
         .failure()
-        .stderr(contains("unimplemented"));
+        .stderr(contains("implemented"));
 }
 
 // `kvs rm <KEY>` should print "unimplemented" to stderr and exit with non-zero code
@@ -49,7 +49,7 @@ fn cli_rm() {
         .args(&["rm", "key1"])
         .assert()
         .failure()
-        .stderr(contains("unimplemented"));
+        .stderr(contains("implemented"));
 }
 
 #[test]
