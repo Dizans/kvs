@@ -3,9 +3,12 @@ name = "kvs"
 version = "0.1.0"
 authors = ["Dizans <dizansyu@gmail.com>"]
 edition = "2018"
-
+description = """
+A simple key-value based in memory database
+"""
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+clap = "2.33.0"
 assert_cmd = "0.11.0"
 predicates = "1.0.0"
