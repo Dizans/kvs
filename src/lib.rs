@@ -1,8 +1,17 @@
 // #![deny(missing_docs)]
 use std::collections::HashMap;
+use std::path::Path;
+
 pub struct KvStore {
     map: HashMap<String, String>,
 }
+
+#[derive(Debug)]
+pub enum KvsError{
+    Io(std::io::Error),
+}
+
+pub type Result<T> = std::result::Result<T, KvsError>;
 
 impl KvStore {
     pub fn new() -> Self {
@@ -21,8 +30,9 @@ impl KvStore {
     ///     Ok(())
     /// }
     /// ```
-    pub fn set(&mut self, key: String, value: String) {
+    pub fn set(&mut self, key: String, value: String) -> Result<()>{
         self.map.insert(key, value);
+        Ok(())
     }
 
     /// get a value by key.return None if the key is not exists
@@ -37,12 +47,17 @@ impl KvStore {
     ///     assert_eq!(v1, Some(String::from("1")));
     ///     Ok(())
     /// }
-    pub fn get(&mut self, key: String) -> Option<String> {
-        self.map.get(&key).and_then(|v: &String| Some(v.clone()))
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+        Ok(self.map.get(&key).and_then(|v: &String| Some(v.clone())))
     }
 
     /// remove a value from database
-    pub fn remove(&mut self, key: String) {
+    pub fn remove(&mut self, key: String) -> Result<()>{
         self.map.remove(&key);
+        Ok(())
+    }
+
+    pub fn open(path: &Path) -> Result<Self>{
+        unimplemented!();
     }
 }
