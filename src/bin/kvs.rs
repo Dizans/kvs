@@ -1,9 +1,11 @@
 use clap::{crate_authors, crate_description, crate_name, crate_version};
 use clap::{App, Arg, SubCommand, AppSettings};
 use kvs::KvStore;
-
+use std::env::current_dir;
 fn main() {
-    let mut kvs = KvStore::open("db").unwrap();
+    
+    let current_dir = current_dir().unwrap();
+    let mut kvs = KvStore::open(current_dir).unwrap();
 
     let matches = App::new(crate_name!()) //  env!("CARGO_PKG_NAME")
         .setting(AppSettings::ArgRequiredElseHelp)
@@ -23,7 +25,7 @@ fn main() {
     if let Some(ref matches) = matches.subcommand_matches("set") {
         let key = matches.value_of("KEY").unwrap();
         let value = matches.value_of("VALUE").unwrap();
-        kvs.set_with_log(key.to_owned(), value.to_owned()).unwrap();
+        kvs.set(key.to_owned(), value.to_owned()).unwrap();
         return;
     }
 
@@ -31,7 +33,7 @@ fn main() {
         let key = matches.value_of("KEY").unwrap();
         match kvs.get(key.to_owned()){
             Ok(Some(v)) => println!("{}", v),
-            Ok(None) => println!("{} does not exists", key),
+            Ok(None) => println!("Key not found"),
             Err(_) => println!("an error occurred"),
         };
         return;
@@ -39,7 +41,13 @@ fn main() {
 
     if let Some(ref matches) = matches.subcommand_matches("rm") {
         let key = matches.value_of("KEY").unwrap();
-        kvs.remove_with_log(key.to_owned()).unwrap();
+        match kvs.remove(key.to_owned()){
+            Ok(_) => {},
+            Err(_) => {
+                println!("Key not found");
+                std::process::exit(1);
+            }
+        }
         return;
     }
 
