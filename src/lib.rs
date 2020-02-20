@@ -1,15 +1,18 @@
 // #![deny(missing_docs)]
+#![feature(seek_convenience)]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
-use std::io::BufReader;
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use std::io::{Seek, SeekFrom};
 
 pub struct KvStore {
-    map: HashMap<String, String>,
-    writter: fs::File,
+    path: PathBuf,
+    map: HashMap<String, ValuePointer>,
+    writter: BufWriter<File>,
 }
 
 #[derive(Error, Debug)]
@@ -26,11 +29,40 @@ pub enum Op {
     RmRec(String),
 }
 
+#[derive(Debug)]
+pub struct ValuePointer{
+    reader: BufReader<File>,
+    offset: u64, 
+}
+
+impl ValuePointer{
+    pub fn new(reader: BufReader<File>, offset: u64) -> Self{ 
+        ValuePointer{
+            reader,
+            offset,
+        }
+    }
+
+    pub fn get(&mut self) -> String{
+        let seek = SeekFrom::Start(self.offset);
+        let mut s = String::new();
+        self.reader.seek(seek).unwrap();
+        self.reader.read_line(&mut s).unwrap();
+        let op: Op = serde_json::from_str(&s).unwrap();
+        match op{
+            Op::SetRec(_, v) => v,
+            _ => unreachable!(),
+        }
+        
+    }
+}
+
 pub type Result<T> = std::result::Result<T, KvsError>;
 
 impl KvStore {
-    pub fn new(writter: fs::File) -> Self {
+    pub fn new(path:PathBuf, writter: BufWriter<File>) -> Self {
         KvStore {
+            path,
             map: HashMap::new(),
             writter,
         }
@@ -50,17 +82,23 @@ impl KvStore {
         self.set_with_option(key, value, true)
     }
 
-    pub fn set_without_log(&mut self, key: String, value: String) -> Result<()> {
-        self.set_with_option(key, value, false)
+    pub fn set_with_pointer(&mut self, key: String, p: ValuePointer){
+        self.map.insert(key, p);
     }
 
     fn set_with_option(&mut self, key: String, value: String, with_log: bool) -> Result<()> {
+        let offset = self.writter.stream_position().unwrap();
+        let reader = BufReader::new(File::open(&self.path)?);
+        let value_pointer = ValuePointer::new(reader, offset);
+
         if with_log {
             let op = Op::SetRec(key.clone(), value.clone());
-            let log = serde_json::to_string(&op).unwrap();
+            let mut log = serde_json::to_string(&op).unwrap();
+            log.push('\n');
             self.writter.write_all(&log.into_bytes())?;
+            self.writter.flush().unwrap(); // make sure reader can get value immediately after set
         }
-        self.map.insert(key, value);
+        self.map.insert(key, value_pointer);
         Ok(())
     }
 
@@ -77,7 +115,11 @@ impl KvStore {
     ///     Ok(())
     /// }
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        Ok(self.map.get(&key).and_then(|v: &String| Some(v.clone())))
+        let value = self.map.get_mut(&key);
+        match value{
+            Some(v) => Ok(Some(v.get())),
+            None => Ok(None)
+        }
     }
 
     /// remove a value from database
@@ -86,7 +128,7 @@ impl KvStore {
     }
 
     pub fn remove_without_log(&mut self, key: String) -> Result<()> {
-        self.remove_with_option(key, true)
+        self.remove_with_option(key, false)
     }
 
     pub fn remove_with_option(&mut self, key: String, with_log: bool) -> Result<()> {
@@ -94,48 +136,57 @@ impl KvStore {
         if exists.is_none(){
             return Err(KvsError::NotFound("Key not found".to_owned()));
         }
-        if exists.is_some() && with_log {
+
+        if with_log {
             let op = Op::RmRec(key);
-            let log = serde_json::to_string(&op).unwrap();
+            let mut log = serde_json::to_string(&op).unwrap();
+            log.push('\n');
+
             self.writter.write_all(&log.into_bytes())?;
         }
         Ok(())
     }
 
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
-        // path is a dir
-        //
-        // if path does not exists => create this dir
-        // if this dir is empty => create a file named 0.log
-        // the log files named from 0.log to n.log
-        // and each log file has a maximum size
-        // get the last log file (n.log), if it's bigger then maximum size
-        // then create a new file n+1.log as the writter
-
         let all_files_path = get_files_path(path).unwrap();
-        let mut ops: Vec<Op> = Vec::new();
 
-        let newst_file = all_files_path.last().unwrap().clone();
+        let newst_file_path = all_files_path.last().unwrap().clone();
 
+        let mut append_file = OpenOptions::new().write(true).open(&newst_file_path)?;
+        append_file.seek(SeekFrom::End(0)).unwrap();
+        
+        let writter = BufWriter::new(append_file);
+
+        let mut new_kvs = KvStore::new(newst_file_path, writter);
+ 
         for path in all_files_path {
-            let db_file = fs::File::open(path)?;
+            let db_file = fs::File::open(&path)?;
             let mut reader = BufReader::new(db_file);
-            let mut log_str = String::new();
-            reader.read_to_string(&mut log_str)?;
-            let mut logs = serde_json::Deserializer::from_str(&log_str).into_iter::<Op>();
-            while let Some(Ok(op)) = logs.next() {
-                ops.push(op);
+            let mut offset = 0;
+        
+            loop{
+                let mut s = String::new();
+                match reader.read_line(&mut s){
+                    Ok(0) => break,
+                    Ok(l) => {
+                        let r = BufReader::new(File::open(&path)?);
+                        let p = ValuePointer::new(r, offset as u64);
+                        offset +=l;
+
+                        let op:Op = serde_json::from_str(&s).unwrap();
+                        match op{
+                            Op::SetRec(k, _) => {new_kvs.set_with_pointer(k, p);},
+                            Op::RmRec(k) => {new_kvs.remove_without_log(k);}
+                        }
+                    },
+                    Err(_) =>{
+                        break;
+                    }
+                }
             }
-        }
-
-        let append_file = OpenOptions::new().append(true).open(newst_file)?;
-
-        let mut new_kvs = KvStore::new(append_file);
-        for op in ops {
-            match op {
-                Op::SetRec(k, v) => new_kvs.set_without_log(k, v).unwrap(),
-                Op::RmRec(k) => new_kvs.remove_without_log(k).unwrap(),
-            };
+            // let mut log_str = String::new();
+            // reader.read_to_string(&mut log_str)?;
+            // let mut logs = serde_json::Deserializer::from_str(&log_str).into_iter::<Op>();
         }
 
         Ok(new_kvs)
