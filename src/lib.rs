@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 use std::io::{Seek, SeekFrom};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -87,7 +87,7 @@ impl KvStore {
     /// use kvs::KvStore;
     ///
     /// fn main()-> Result<(), Box<dyn Error>>{
-    ///     let mut kv = KvStore::new();
+    ///     let mut kvs = KvStore::open("0.log");
     ///     kv.set("one".to_owned(), "1".to_owned());
     ///     Ok(())
     /// }
@@ -140,7 +140,7 @@ impl KvStore {
     /// use kvs::KvStore;
     ///
     /// fn main() -> Result<(), Box<dyn Error>> {
-    ///     let mut kv = KvStore::new();
+    ///     let mut kv = KvStore::open("0.log");
     ///     kv.set("one".to_owned(), "1".to_owned());
     ///     let v1 = kv.get("one".to_owned());
     ///     assert_eq!(v1, Some(String::from("1")));
@@ -228,7 +228,10 @@ impl KvStore {
                     let op:Op = serde_json::from_str(&s).unwrap();
                     match op{
                         Op::SetRec(k, _) => {kvs.set_with_offset(k, file_offset);},
-                        Op::RmRec(k) => {kvs.remove_without_log(k);}
+                        Op::RmRec(k) => {match kvs.remove_without_log(k){
+                            Err(_) => continue,
+                            Ok(_) => continue,
+                        }}
                     }
                 },
                 Err(_) =>{
