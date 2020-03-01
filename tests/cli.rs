@@ -152,7 +152,28 @@ fn server_cli_version() {
 }
 
 #[test]
-fn cli_log_configuration) second
+fn cli_log_configuration() {
+    let temp_dir = TempDir::new().unwrap();
+    let stderr_path = temp_dir.path().join("stderr");
+    let mut cmd = Command::cargo_bin("kvs-server").unwrap();
+    let mut child = cmd
+        .args(&["--engine", "kvs", "--addr", "127.0.0.1:4001"])
+        .current_dir(&temp_dir)
+        .stderr(File::create(&stderr_path).unwrap())
+        .spawn()
+        .unwrap();
+    thread::sleep(Duration::from_secs(1));
+    child.kill().expect("server exited before killed");
+
+    let content = fs::read_to_string(&stderr_path).expect("unable to read from stderr file");
+    assert!(content.contains(env!("CARGO_PKG_VERSION")));
+    assert!(content.contains("kvs"));
+    assert!(content.contains("127.0.0.1:4001"));
+}
+
+// #[test]
+fn cli_wrong_engine() {
+    // sled first, kvs second
     {
         let temp_dir = TempDir::new().unwrap();
         let mut cmd = Command::cargo_bin("kvs-server").unwrap();
@@ -222,43 +243,7 @@ fn cli_access_server(engine: &str, addr: &str) {
         .success()
         .stdout("value1\n");
 
-    Command::cargo_bin"nt_dir(&temp_dir)
-        .spawn()
-        .unwrap();
-    let handle = thread::spawn(move || {
-        let _ = receiver.recv(); // wait for main thread to finish
-        child.kill().expect("server exited before killed");
-    });
-    thread::sleep(Duration::from_secs(1));
-
     Command::cargo_bin("kvs-client")
-        .unwrap()
-        .args(&["get", "key2", "--addr", addr])
-        .current_dir(&temp_dir)
-        .assert()
-        .success()
-        .stdout(contains("value3"));
-    Command::cargo_bin("kvs-client")
-        .unwrap()
-        .args(&["get", "key1", "--addr", addr])
-        .current_dir(&temp_dir)
-        .assert()
-        .success()
-        .stdout(contains("Key not found"));
-    sender.send(()).unwrap();
-    handle.join().unwrap();
-}
-
-#[test]
-fn cli_access_server_kvs_engine() {
-    cli_access_server("kvs", "127.0.0.1:4004");
-}
-
-#[test]
-fn cli_access_server_sled_engine() {
-    cli_access_server("sled", "127.0.0.1:4005");
-}
-kvs-client")
         .unwrap()
         .args(&["set", "key1", "value2", "--addr", addr])
         .current_dir(&temp_dir)
@@ -314,25 +299,40 @@ kvs-client")
     let mut server = Command::cargo_bin("kvs-server").unwrap();
     let mut child = server
         .args(&["--engine", engine, "--addr", addr])
-        .curre( {
-    let temp_dir = TempDir::new().unwrap();
-    let stderr_path = temp_dir.path().join("stderr");
-    let mut cmd = Command::cargo_bin("kvs-server").unwrap();
-    let mut child = cmd
-        .args(&["--engine", "kvs", "--addr", "127.0.0.1:4001"])
         .current_dir(&temp_dir)
-        .stderr(File::create(&stderr_path).unwrap())
         .spawn()
         .unwrap();
+    let handle = thread::spawn(move || {
+        let _ = receiver.recv(); // wait for main thread to finish
+        child.kill().expect("server exited before killed");
+    });
     thread::sleep(Duration::from_secs(1));
-    child.kill().expect("server exited before killed");
 
-    let content = fs::read_to_string(&stderr_path).expect("unable to read from stderr file");
-    assert!(content.contains(env!("CARGO_PKG_VERSION")));
-    assert!(content.contains("kvs"));
-    assert!(content.contains("127.0.0.1:4001"));
+    Command::cargo_bin("kvs-client")
+        .unwrap()
+        .args(&["get", "key2", "--addr", addr])
+        .current_dir(&temp_dir)
+        .assert()
+        .success()
+        .stdout(contains("value3"));
+    Command::cargo_bin("kvs-client")
+        .unwrap()
+        .args(&["get", "key1", "--addr", addr])
+        .current_dir(&temp_dir)
+        .assert()
+        .success()
+        .stdout(contains("Key not found"));
+    sender.send(()).unwrap();
+    handle.join().unwrap();
 }
 
 #[test]
-fn cli_wrong_engine() {
-    // sled first, kvs(
+fn cli_access_server_kvs_engine() {
+    cli_access_server("kvs", "127.0.0.1:4004");
+}
+
+#[test]
+fn cli_access_server_sled_engine() {
+    cli_access_server("sled", "127.0.0.1:4005");
+}
+
