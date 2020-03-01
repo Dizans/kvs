@@ -1,23 +1,11 @@
 use clap::{crate_authors, crate_description, crate_name, crate_version};
 use clap::{App, Arg, SubCommand, AppSettings};
-use kvs::KvStore;
-use std::env::current_dir;
-use std::net::SocketAddr;
-
-macro_rules! addr_arg {
-    () => {
-        Arg::with_name("addr")
-        .takes_value(true)
-        .multiple(false)
-        .help("--addr IP:PORT")
-        .long("addr")
-    }
-}
+use std::net::{SocketAddr, TcpStream};
+use std::io::prelude::*;
+use std::str;
+use kvs::*;
 
 fn main() {
-    let current_dir = current_dir().unwrap();
-    let mut kvs = KvStore::open(current_dir).unwrap();
-
     let matches = App::new(crate_name!()) //  env!("CARGO_PKG_NAME")
         .setting(AppSettings::ArgRequiredElseHelp)
         .bin_name("kvs-client")
@@ -29,15 +17,15 @@ fn main() {
                 .arg(Arg::with_name("KEY").index(1).required(true))
                 .arg(Arg::with_name("VALUE").index(2).required(true))
                 .arg(
-                    addr_arg!()
+                    addr_arg()
                 ),
         )
         .subcommand(SubCommand::with_name("get")
                     .arg(Arg::with_name("KEY").required(true))
-                    .arg(addr_arg!()))
+                    .arg(addr_arg()))
         .subcommand(SubCommand::with_name("rm")
                     .arg(Arg::with_name("KEY").required(true))
-                    .arg(addr_arg!()))
+                    .arg(addr_arg()))
         .get_matches();
     
     let mut addr: SocketAddr = "127.0.0.1:4000".parse().unwrap();
@@ -47,49 +35,54 @@ fn main() {
         let value = matches.value_of("VALUE").unwrap();
 
         match_addr(&matches, &mut addr);
-        kvs.set(key.to_owned(), value.to_owned()).unwrap();
-        println!("{}", addr);
+        let command = Command::Set(key.to_owned(), value.to_owned());
+        let msg = serde_json::to_string(&command).unwrap();
+        call_server(&addr, &msg);
         return;
     }
 
     if let Some(ref matches) = matches.subcommand_matches("get") {
         let key = matches.value_of("KEY").unwrap();
         match_addr(&matches, &mut addr);
-        match kvs.get(key.to_owned()){
-            Ok(Some(v)) => println!("{}", v),
-            Ok(None) => println!("Key not found"),
-            Err(_) => println!("an error occurred"),
-        };
+        let command = Command::Get(key.to_owned());
+        let msg = serde_json::to_string(&command).unwrap();
+        let res = call_server(&addr, &msg);
+        match res{
+            Response::Error(ServerError::NotFound) => println!("Key not found"),
+            Response::Value(s) => println!("{}", s),
+            _ => {},
+        }
         return;
     }
 
     if let Some(ref matches) = matches.subcommand_matches("rm") {
         let key = matches.value_of("KEY").unwrap();
         match_addr(&matches, &mut addr);
-        match kvs.remove(key.to_owned()){
-            Ok(_) => {},
-            Err(_) => {
-                println!("Key not found");
-                std::process::exit(2);
-            }
+        let command = Command::Rm(key.to_owned());
+        let msg = serde_json::to_string(&command).unwrap();
+        let res = call_server(&addr, &msg);
+        match res{
+            Response::Error(ServerError::NotFound) => {
+                eprintln!("Key not found");
+                std::process::exit(1);
+            },
+            _ => {},
         }
         return;
     }
-
 }
 
-fn set(key: String, value: String){
+fn call_server(addr: &SocketAddr, msg: &str) -> Response{
+    let mut stream = TcpStream::connect(addr)
+                    .unwrap_or_else(|e| panic!("connect to server failed: {}", e));
+    stream.write(msg.as_bytes()).unwrap();
 
+    let mut buf = [0; 512];
+    
+    let len = stream.read(&mut buf).unwrap();
+    let response: Response = serde_json::from_slice(&buf[0..len]).unwrap(); 
+    response
 }
-
-fn get(key: String) -> Option<String>{
-    Some(format!(""))
-}
-
-fn rm(key: String){
-
-}
-
 
 fn match_addr(matches: &clap::ArgMatches, addr:&mut std::net::SocketAddr){
   if matches.is_present("addr"){
@@ -103,3 +96,12 @@ fn match_addr(matches: &clap::ArgMatches, addr:&mut std::net::SocketAddr){
       };
   }
 }
+
+fn addr_arg() -> clap::Arg<'static,'static>{
+    Arg::with_name("addr")
+    .takes_value(true)
+    .multiple(false)
+    .help("--addr IP:PORT")
+    .long("addr")
+}
+
